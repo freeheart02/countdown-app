@@ -574,23 +574,19 @@ public static class BorderlessResize
     }
 
     function Move-Countdown($id, [string]$way) {
-        $items = @($script:data)
+        $items = @(Group-Data $script:data)
         $idx = -1
         for ($i = 0; $i -lt $items.Count; $i++) {
             if ([string]$items[$i].id -eq [string]$id) { $idx = $i; break }
         }
         if ($idx -lt 0) { return }
-        $g = [string]$items[$idx].group
         $step = if ($way -eq 'up') { -1 } else { 1 }
         $j = $idx + $step
-        while ($j -ge 0 -and $j -lt $items.Count -and [string]$items[$j].group -ne $g) {
-            $j += $step
-        }
         if ($j -lt 0 -or $j -ge $items.Count) { return }
         $tmp = $items[$idx]
         $items[$idx] = $items[$j]
         $items[$j] = $tmp
-        $script:data = $items
+        $script:data = @(Group-Data $items)
         Save-Data $script:data
         Render
     }
