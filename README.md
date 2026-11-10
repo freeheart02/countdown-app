@@ -1,3 +1,5 @@
+[English](README.en.md) | 中文
+
 # 桌面倒计时小程序
 
 一个用 Windows 自带的 PowerShell + WPF 写的小巧倒计时窗口，双击就能用，**无需安装任何软件**。
