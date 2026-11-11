@@ -2,3 +2,6 @@
 countdown-data.txt
 countdown-log.txt
 countdown-settings.txt
+
+# Windows 快捷方式 —— 含本机路径/机器ID，不提交
+*.lnk
