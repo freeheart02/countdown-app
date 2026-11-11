@@ -21,14 +21,15 @@ try {
     # ---------- 数据文件（和本脚本放在同一个文件夹） ----------
     $script:dataFile     = Join-Path $PSScriptRoot 'countdown-data.txt'
     $script:settingsFile = Join-Path $PSScriptRoot 'countdown-settings.txt'
+    $script:historyFile  = Join-Path $PSScriptRoot 'countdown-history.txt'
 
     # 数据用最简单的“每行一条，竖线分隔”格式保存，不用 JSON。
     # 每行格式：编号|名字|目标时间|分组   （旧的三字段数据会自动归入“默认”分组）
-    function Load-Data {
-        if (-not (Test-Path $script:dataFile)) { return @() }
+    function Read-DataFile([string]$file) {
+        if (-not (Test-Path $file)) { return @() }
         $lines = $null
         try {
-            $lines = [System.IO.File]::ReadAllLines($script:dataFile, [System.Text.Encoding]::UTF8)
+            $lines = [System.IO.File]::ReadAllLines($file, [System.Text.Encoding]::UTF8)
         } catch {
             Write-Log ('读数据文件失败：' + $_.Exception.Message)
             return @()
@@ -67,6 +68,9 @@ try {
         return $result
     }
 
+    function Load-Data { return @(Read-DataFile $script:dataFile) }
+    function Load-History { return @(Read-DataFile $script:historyFile) }
+
     # 按分组归拢（保持组内原有顺序、组间按首次出现顺序）
     function Group-Data($list) {
         $items = @($list)
@@ -84,14 +88,16 @@ try {
         return $out
     }
 
-    function Save-Data($list) {
-        $items = @(Group-Data $list)
+    function Write-DataFile([string]$file, $list) {
         $lines = @()
-        foreach ($it in $items) {
+        foreach ($it in @($list)) {
             $lines += ([string]$it.id) + '|' + ([string]$it.name) + '|' + ([string]$it.target) + '|' + ([string]$it.group)
         }
-        [System.IO.File]::WriteAllLines($script:dataFile, $lines, (New-Object System.Text.UTF8Encoding $false))
+        [System.IO.File]::WriteAllLines($file, $lines, (New-Object System.Text.UTF8Encoding $false))
     }
+
+    function Save-Data($list) { Write-DataFile $script:dataFile @(Group-Data $list) }
+    function Save-History($list) { Write-DataFile $script:historyFile @($list) }
 
     # ---------- 设置（皮肤 + 声音） ----------
     function Load-Settings {
@@ -224,10 +230,11 @@ public static class BorderlessResize
           <ColumnDefinition Width="*"/>
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
-        <TextBlock Grid.Column="0" Text="我的倒计时" FontSize="15" FontWeight="Bold" Foreground="#E2E8F0" Margin="16,14,0,14" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Grid.Column="0" Text="倒计时" FontSize="15" FontWeight="Bold" Foreground="#E2E8F0" Margin="16,14,0,14" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
           <Button x:Name="BtnToggleForm" Content="＋ 添加" Width="52" Height="28" FontSize="12" Foreground="#22D3EE" Background="Transparent" BorderThickness="0" Cursor="Hand" ToolTip="添加倒计时"/>
           <Button x:Name="BtnSet" Content="设置" Width="40" Height="28" FontSize="12" Foreground="#E2E8F0" Background="Transparent" BorderThickness="0" Cursor="Hand" ToolTip="皮肤和声音设置"/>
+          <Button x:Name="BtnHistory" Content="历史" Width="40" Height="28" FontSize="12" Foreground="#E2E8F0" Background="Transparent" BorderThickness="0" Cursor="Hand" ToolTip="查看已归档的倒计时"/>
           <Button x:Name="BtnPin" Content="取消置顶" Width="56" Height="28" FontSize="12" Foreground="#E2E8F0" Background="Transparent" BorderThickness="0" Cursor="Hand" ToolTip="固定/取消置顶"/>
           <Button x:Name="BtnMin" Content="—" Width="30" Height="28" FontSize="14" Foreground="#94A3B8" Background="Transparent" BorderThickness="0" Cursor="Hand" ToolTip="最小化"/>
           <Button x:Name="BtnClose" Content="×" Width="30" Height="28" FontSize="15" Foreground="#94A3B8" Background="Transparent" BorderThickness="0" Cursor="Hand" ToolTip="关闭"/>
@@ -257,6 +264,15 @@ public static class BorderlessResize
         </StackPanel>
       </Border>
 
+      <Border x:Name="HistoryPanel" Grid.Row="1" Background="#12000000" CornerRadius="10" Margin="16,12,16,10" Padding="12" Visibility="Collapsed">
+        <StackPanel>
+          <TextBlock Text="已归档的倒计时（点“重新启用”改日期后再启动）" FontSize="12" Foreground="#94A3B8" TextWrapping="Wrap"/>
+          <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,6,0,0">
+            <StackPanel x:Name="HistoryList"/>
+          </ScrollViewer>
+        </StackPanel>
+      </Border>
+
       <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="8,2,8,10">
         <StackPanel x:Name="CardPanel"/>
       </ScrollViewer>
@@ -277,8 +293,11 @@ public static class BorderlessResize
     $BtnClose      = $window.FindName('BtnClose')
     $BtnToggleForm = $window.FindName('BtnToggleForm')
     $BtnSet        = $window.FindName('BtnSet')
+    $BtnHistory    = $window.FindName('BtnHistory')
     $FormPanel     = $window.FindName('FormPanel')
     $SettingsPanel = $window.FindName('SettingsPanel')
+    $HistoryPanel  = $window.FindName('HistoryPanel')
+    $HistoryList   = $window.FindName('HistoryList')
     $ThemePanel    = $window.FindName('ThemePanel')
     $SoundCheck    = $window.FindName('SoundCheck')
     $Root          = $window.FindName('Root')
@@ -406,7 +425,7 @@ public static class BorderlessResize
         $down.Tag = $id
         $down.Add_Click({ param($s, $e) Move-Countdown $s.Tag 'down' })
 
-        $del = New-IconButton '×' '删除'
+        $del = New-IconButton '×' '归档（可从历史恢复）'
         $del.Tag = $id
         $del.Add_Click({ param($s, $e) Remove-Countdown $s.Tag })
 
@@ -568,7 +587,17 @@ public static class BorderlessResize
     }
 
     function Remove-Countdown($id) {
-        $script:data = @($script:data | Where-Object { [string]$_.id -ne [string]$id })
+        $id = [string]$id
+        $item = $null
+        foreach ($it in @($script:data)) {
+            if ([string]$it.id -eq $id) { $item = $it; break }
+        }
+        if ($item) {
+            # 归档到历史（不是彻底删除），方便以后再启用
+            $hist = @(Load-History) + $item
+            Save-History $hist
+        }
+        $script:data = @($script:data | Where-Object { [string]$_.id -ne $id })
         Save-Data $script:data
         Render
     }
@@ -589,6 +618,106 @@ public static class BorderlessResize
         $script:data = @(Group-Data $items)
         Save-Data $script:data
         Render
+    }
+
+    # ---------- 历史归档 ----------
+    function Render-History {
+        $HistoryList.Children.Clear()
+        $hist = @(Load-History)
+        if ($hist.Count -eq 0) {
+            $t = New-Object System.Windows.Controls.TextBlock
+            $t.Text = '还没有归档的倒计时'
+            $t.FontSize = 12
+            $t.Foreground = $script:brushDim
+            $t.Margin = New-Object System.Windows.Thickness(0, 4, 0, 0)
+            $HistoryList.Children.Add($t) | Out-Null
+            return
+        }
+        [array]::Reverse($hist)
+        foreach ($it in $hist) {
+            $row = New-Object System.Windows.Controls.Border
+            $row.Background = $script:brushCard
+            $row.CornerRadius = New-Object System.Windows.CornerRadius(8)
+            $row.Padding = New-Object System.Windows.Thickness(10, 8, 10, 8)
+            $row.Margin = New-Object System.Windows.Thickness(0, 0, 0, 8)
+
+            $stack = New-Object System.Windows.Controls.StackPanel
+
+            $r1 = New-Object System.Windows.Controls.DockPanel
+            $acts = New-Object System.Windows.Controls.StackPanel
+            $acts.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+
+            $btnUse = New-Object System.Windows.Controls.Button
+            $btnUse.Content = '重新启用'
+            $btnUse.FontSize = 12
+            $btnUse.Foreground = $script:brushAccent
+            $btnUse.Background = [System.Windows.Media.Brushes]::Transparent
+            $btnUse.BorderThickness = New-Object System.Windows.Thickness(0)
+            $btnUse.Cursor = [System.Windows.Input.Cursors]::Hand
+            $btnUse.Tag = [string]$it.id
+            $btnUse.Add_Click({ param($s, $e) Reuse-Countdown ([string]$s.Tag) })
+
+            $btnDel = New-Object System.Windows.Controls.Button
+            $btnDel.Content = '删除'
+            $btnDel.FontSize = 12
+            $btnDel.Foreground = $script:brushDim
+            $btnDel.Background = [System.Windows.Media.Brushes]::Transparent
+            $btnDel.BorderThickness = New-Object System.Windows.Thickness(0)
+            $btnDel.Cursor = [System.Windows.Input.Cursors]::Hand
+            $btnDel.Tag = [string]$it.id
+            $btnDel.Add_Click({ param($s, $e) Remove-HistoryItem ([string]$s.Tag) })
+
+            $acts.Children.Add($btnUse) | Out-Null
+            $acts.Children.Add($btnDel) | Out-Null
+            [System.Windows.Controls.DockPanel]::SetDock($acts, [System.Windows.Controls.Dock]::Right)
+            $r1.Children.Add($acts) | Out-Null
+
+            $nameTb = New-Object System.Windows.Controls.TextBlock
+            $nameTb.Text = [string]$it.name
+            $nameTb.FontSize = 14
+            $nameTb.FontWeight = [System.Windows.FontWeights]::Bold
+            $nameTb.Foreground = $script:brushText
+            $nameTb.TextTrimming = [System.Windows.TextTrimming]::CharacterEllipsis
+            $nameTb.Margin = New-Object System.Windows.Thickness(0, 2, 0, 0)
+            $r1.Children.Add($nameTb) | Out-Null
+            $stack.Children.Add($r1) | Out-Null
+
+            $infoTb = New-Object System.Windows.Controls.TextBlock
+            $infoTb.Text = '原目标：' + [string]$it.target + '　组：' + [string]$it.group
+            $infoTb.FontSize = 11
+            $infoTb.Foreground = $script:brushDim
+            $infoTb.Margin = New-Object System.Windows.Thickness(0, 4, 0, 0)
+            $stack.Children.Add($infoTb) | Out-Null
+
+            $row.Child = $stack
+            $HistoryList.Children.Add($row) | Out-Null
+        }
+    }
+
+    function Reuse-Countdown($id) {
+        $item = $null
+        foreach ($it in @(Load-History)) {
+            if ([string]$it.id -eq [string]$id) { $item = $it; break }
+        }
+        if (-not $item) { return }
+        $NameBox.Text = [string]$item.name
+        $GroupBox.Text = [string]$item.group
+        $DatePick.SelectedDate = Get-Date
+        $dt = [datetime]::MinValue
+        if ([datetime]::TryParseExact([string]$item.target, 'yyyy-MM-dd HH:mm', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$dt)) {
+            $TimeBox.Text = $dt.ToString('HH:mm', [System.Globalization.CultureInfo]::InvariantCulture)
+        } else {
+            $TimeBox.Text = '09:00'
+        }
+        $HistoryPanel.Visibility = [System.Windows.Visibility]::Collapsed
+        $SettingsPanel.Visibility = [System.Windows.Visibility]::Collapsed
+        $FormPanel.Visibility = [System.Windows.Visibility]::Visible
+    }
+
+    function Remove-HistoryItem($id) {
+        $hist = @(Load-History | Where-Object { [string]$_.id -ne [string]$id })
+        Save-History $hist
+        Render-History
     }
 
     # ---------- 事件 ----------
@@ -620,6 +749,18 @@ public static class BorderlessResize
         }
     }
     $BtnSet.Add_Click({ Toggle-Settings })
+
+    function Toggle-History {
+        if ($HistoryPanel.Visibility -eq [System.Windows.Visibility]::Visible) {
+            $HistoryPanel.Visibility = [System.Windows.Visibility]::Collapsed
+        } else {
+            $FormPanel.Visibility = [System.Windows.Visibility]::Collapsed
+            $SettingsPanel.Visibility = [System.Windows.Visibility]::Collapsed
+            Render-History
+            $HistoryPanel.Visibility = [System.Windows.Visibility]::Visible
+        }
+    }
+    $BtnHistory.Add_Click({ Toggle-History })
 
     $Header.Add_MouseLeftButtonDown({ try { $window.DragMove() } catch {} })
 
